@@ -4,8 +4,7 @@ import { useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 // ✅ Computer ka actual IP (ipconfig se 192.168.1.148)
-const API_BASE_URL = "http://192.168.1.107:8000";   // ✅ Use current laptop IP
-export default function Login() {
+const API_BASE_URL = "http://192.168.0.95:8000";export default function Login() {
   const router = useRouter();
   const [email, setEmail] = useState("55@gmail.com");   // pre-filled for testing
   const [password, setPassword] = useState("");         // enter your password

@@ -204,6 +204,18 @@ const getLastPrice = async (customerId, productId) => {
   }
 };
 
+const getProductById = async (productId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/products/${productId}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching product:', error);
+    return null;
+  }
+};
+
 const createSalesOrder = async (customerId, orderData) => {
   const url = `${API_BASE_URL}/sales-orders/mobile?customer_id=${customerId}`;
   const response = await fetch(url, {
@@ -244,7 +256,7 @@ const formatPrice = (price) => {
 };
 
 // ============================================
-// UPDATED CHECKOUT PAGE – NO TAX/DISCOUNT CARD
+// CHECKOUT PAGE
 // ============================================
 const CheckoutScreen = ({ onClose, subtotal, cartTaxPercent, cartDiscountPercent, selectedCustomer }) => {
   const [orderPlacing, setOrderPlacing] = useState(false);
@@ -269,18 +281,15 @@ const CheckoutScreen = ({ onClose, subtotal, cartTaxPercent, cartDiscountPercent
     }
 
     const branch_id = 1;
-    // Note: subtotal already includes tax and discount (it's the grand total)
     const grandTotal = subtotal;
-    // These values are not used in payload but kept for consistency
     const taxAmount = (subtotal * (cartTaxPercent || 0)) / 100;
     const discountAmount = (subtotal * (cartDiscountPercent || 0)) / 100;
-    const totalBeforeTaxDiscount = subtotal - taxAmount + discountAmount; // not used
 
     const orderPayload = {
       branch_id: branch_id,
       customer_id: selectedCustomer.id,
       user_id: userId,
-      total_amount: subtotal, // This is the total after tax/discount? Actually better to send original subtotal.
+      total_amount: subtotal,
       discount: discountAmount,
       tax_amount: taxAmount,
       grand_total: grandTotal,
@@ -323,15 +332,12 @@ const CheckoutScreen = ({ onClose, subtotal, cartTaxPercent, cartDiscountPercent
         <Text style={{ fontSize: 24, fontWeight: 'bold' }}>Checkout</Text>
       </View>
       <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Order Summary */}
         <View style={{ backgroundColor: '#fff', margin: 16, borderRadius: 16, padding: 16 }}>
           <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Order Summary</Text>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text>Total</Text><Text style={{ fontWeight: 'bold', color: '#FF6B6B' }}>{formatPrice(subtotal)}</Text>
           </View>
         </View>
-
-        {/* Customer info (non-editable) */}
         <View style={{ backgroundColor: '#fff', margin: 16, borderRadius: 16, padding: 16 }}>
           <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Customer</Text>
           <View style={{ marginTop: 8 }}>
@@ -341,7 +347,6 @@ const CheckoutScreen = ({ onClose, subtotal, cartTaxPercent, cartDiscountPercent
           </View>
         </View>
       </ScrollView>
-
       <TouchableOpacity onPress={handlePlaceOrder} disabled={orderPlacing || !selectedCustomer} style={{ backgroundColor: (!selectedCustomer || orderPlacing) ? '#adb5bd' : '#FF6B6B', padding: 15, margin: 16, borderRadius: 12 }}>
         <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>{orderPlacing ? 'Placing Order...' : 'Confirm Order'}</Text>
       </TouchableOpacity>
@@ -350,7 +355,7 @@ const CheckoutScreen = ({ onClose, subtotal, cartTaxPercent, cartDiscountPercent
 };
 
 // ============================================
-// CART PAGE – WITH LAST PRICE FEATURE & COLLAPSIBLE PRICE DETAILS
+// CART PAGE
 // ============================================
 const CartScreen = ({ onClose, onCheckout }) => {
   const [cartItemsState, setCartItemsState] = useState(cartItems);
@@ -368,6 +373,10 @@ const CartScreen = ({ onClose, onCheckout }) => {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [applyingLastPrice, setApplyingLastPrice] = useState(false);
   const [priceDetailsVisible, setPriceDetailsVisible] = useState(true);
+  const [editPriceModalVisible, setEditPriceModalVisible] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [newPriceValue, setNewPriceValue] = useState('');
+  const [originalSellingPrice, setOriginalSellingPrice] = useState(0);
 
   useEffect(() => {
     const updateCart = (items) => setCartItemsState([...items]);
@@ -460,6 +469,42 @@ const CartScreen = ({ onClose, onCheckout }) => {
     }
   };
 
+  const openEditPriceModal = async (item) => {
+    setEditingProduct(item);
+    setNewPriceValue(item.price.toString());
+    try {
+      const productData = await getProductById(item.id);
+      if (productData && productData.selling_price) {
+        setOriginalSellingPrice(parseFloat(productData.selling_price));
+      } else {
+        setOriginalSellingPrice(item.originalPrice || item.price);
+      }
+    } catch (error) {
+      setOriginalSellingPrice(item.originalPrice || item.price);
+    }
+    setEditPriceModalVisible(true);
+  };
+
+  const handleUpdatePrice = () => {
+    const price = parseFloat(newPriceValue);
+    if (isNaN(price) || price <= 0) {
+      Alert.alert('Invalid Price', 'Please enter a valid price greater than 0.');
+      return;
+    }
+    if (price < originalSellingPrice) {
+      Alert.alert(
+        'Price Validation Failed', 
+        `You cannot set a price (${formatPrice(price)}) less than the actual selling price (${formatPrice(originalSellingPrice)}).\n\nMinimum allowed price: ${formatPrice(originalSellingPrice)}`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    updateCartPrice(editingProduct.id, price);
+    setEditPriceModalVisible(false);
+    setEditingProduct(null);
+    Alert.alert('Success', `Price updated to ${formatPrice(price)}`);
+  };
+
   const subtotal = getSubtotal();
   const taxAmount = (subtotal * taxPercent) / 100;
   const discountAmount = (subtotal * discountPercent) / 100;
@@ -507,7 +552,6 @@ const CartScreen = ({ onClose, onCheckout }) => {
         <Text style={{ fontSize: 14, color: '#666', marginLeft: 10 }}>{getCartItemCount()} items</Text>
       </View>
 
-      {/* Last Price Control Panel */}
       <View style={{ backgroundColor: '#fff', margin: 12, padding: 12, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOpacity: 0.05, elevation: 2 }}>
         <TouchableOpacity onPress={toggleLastPrice} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: lastPriceEnabled ? '#198754' : '#6c757d', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 }}>
           <Text style={{ color: '#fff', marginRight: 8 }}>{lastPriceEnabled ? 'Last Price ON' : 'Last Price OFF'}</Text>
@@ -529,7 +573,6 @@ const CartScreen = ({ onClose, onCheckout }) => {
         )}
       </View>
 
-      {/* Items List */}
       <FlatList
         data={cartItemsState}
         keyExtractor={(item) => String(item.id)}
@@ -542,7 +585,12 @@ const CartScreen = ({ onClose, onCheckout }) => {
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{item.name}</Text>
-              <Text style={{ fontSize: 15, color: '#FF6B6B', fontWeight: 'bold', marginTop: 4 }}>{formatPrice(item.price)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                <Text style={{ fontSize: 15, color: '#FF6B6B', fontWeight: 'bold' }}>{formatPrice(item.price)}</Text>
+                <TouchableOpacity onPress={() => openEditPriceModal(item)} style={{ marginLeft: 10, padding: 4 }}>
+                  <Text style={{ fontSize: 16 }}>✏️</Text>
+                </TouchableOpacity>
+              </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8f9fa', borderRadius: 25, padding: 4 }}>
                   <TouchableOpacity onPress={() => updateCartQuantity(item.id, item.quantity - 1)} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#e9ecef', justifyContent: 'center', alignItems: 'center' }}>
@@ -564,7 +612,6 @@ const CartScreen = ({ onClose, onCheckout }) => {
         contentContainerStyle={{ paddingBottom: 20 }}
       />
 
-      {/* Collapsible Price Details Section */}
       <View style={{ backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e0e0e0' }}>
         <TouchableOpacity
           onPress={() => setPriceDetailsVisible(!priceDetailsVisible)}
@@ -615,7 +662,6 @@ const CartScreen = ({ onClose, onCheckout }) => {
         )}
       </View>
 
-      {/* Coupon Modal */}
       <Modal visible={showCoupon} transparent animationType="fade">
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' }}>
@@ -634,7 +680,33 @@ const CartScreen = ({ onClose, onCheckout }) => {
         </View>
       </Modal>
 
-      {/* Customer Selection Modal for Last Price */}
+      <Modal visible={editPriceModalVisible} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '85%' }}>
+            <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 15 }}>Edit Price</Text>
+            <Text style={{ marginBottom: 5, fontWeight: 'bold' }}>Product: {editingProduct?.name}</Text>
+            <Text style={{ marginBottom: 15, fontSize: 12, color: '#666' }}>
+              Actual Selling Price: {formatPrice(originalSellingPrice)}
+            </Text>
+            <TextInput
+              placeholder="Enter new price"
+              value={newPriceValue}
+              onChangeText={setNewPriceValue}
+              keyboardType="numeric"
+              style={{ borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 12, padding: 12, marginBottom: 15, fontSize: 16 }}
+            />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <TouchableOpacity onPress={() => setEditPriceModalVisible(false)} style={{ flex: 1, padding: 12, borderRadius: 12, marginRight: 10, backgroundColor: '#f0f0f0', alignItems: 'center' }}>
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleUpdatePrice} style={{ flex: 1, padding: 12, borderRadius: 12, backgroundColor: '#FF6B6B', alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Update</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={customerModalVisible} animationType="slide" transparent={false}>
         <View style={{ flex: 1, backgroundColor: '#fff' }}>
           <View style={{ padding: 20, paddingTop: 50, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' }}>
@@ -664,7 +736,7 @@ const CartScreen = ({ onClose, onCheckout }) => {
 };
 
 // ============================================
-// MAIN CATEGORIES SCREEN (unchanged, but handleCheckout passes selectedCustomer)
+// MAIN CATEGORIES SCREEN - WITH QUANTITY SELECTOR IN SINGLE PRODUCT MODAL
 // ============================================
 export default function CategoriesScreen() {
   const [categories, setCategories] = useState([]);
@@ -685,6 +757,15 @@ export default function CategoriesScreen() {
   const [showCheckoutPage, setShowCheckoutPage] = useState(false);
   const [checkoutData, setCheckoutData] = useState({ subtotal: 0, taxPercent: 0, discountPercent: 0, selectedCustomer: null });
   const [cartProductIds, setCartProductIds] = useState({});
+  
+  const [globalProductResults, setGlobalProductResults] = useState([]);
+  const [globalProductsLoading, setGlobalProductsLoading] = useState(false);
+  const [showGlobalResults, setShowGlobalResults] = useState(false);
+  
+  // State for single product modal
+  const [singleProductModalVisible, setSingleProductModalVisible] = useState(false);
+  const [singleProductData, setSingleProductData] = useState(null);
+  const [selectedQuantity, setSelectedQuantity] = useState(1);
 
   useEffect(() => {
     const updateCart = (items) => {
@@ -702,9 +783,67 @@ export default function CategoriesScreen() {
   }, []);
 
   useEffect(() => {
-    if (searchQuery.trim() === "") setFilteredCategories(categories);
-    else setFilteredCategories(categories.filter(c => c.name?.toLowerCase().includes(searchQuery.toLowerCase())));
+    if (searchQuery.trim() === "") {
+      setFilteredCategories(categories);
+      setShowGlobalResults(false);
+      setGlobalProductResults([]);
+    } else {
+      setFilteredCategories(categories);
+      searchProductsGlobally(searchQuery);
+      setShowGlobalResults(true);
+    }
   }, [searchQuery, categories]);
+
+  const searchProductsGlobally = async (query) => {
+    if (!query.trim()) {
+      setGlobalProductResults([]);
+      return;
+    }
+    
+    setGlobalProductsLoading(true);
+    const allProducts = [];
+    for (const category of categories) {
+      const products = await getProductsByCategory(category.id, category.name);
+      const matchedProducts = products.filter(p => 
+        p.name?.toLowerCase().includes(query.toLowerCase())
+      ).map(p => ({ ...p, categoryName: category.name, categoryId: category.id }));
+      allProducts.push(...matchedProducts);
+    }
+    setGlobalProductResults(allProducts);
+    setGlobalProductsLoading(false);
+  };
+
+  const handleGlobalProductPress = (product) => {
+    setSingleProductData(product);
+    setSelectedQuantity(1); // Reset quantity to 1 when opening modal
+    setSingleProductModalVisible(true);
+    setShowGlobalResults(false);
+    setSearchQuery("");
+  };
+
+  const handleAddToCartWithQuantity = () => {
+    if (singleProductData) {
+      addToCart(singleProductData, selectedQuantity);
+      Alert.alert('Added to Cart', `${selectedQuantity} x ${singleProductData.name} added to cart`);
+      setSingleProductModalVisible(false);
+      setSelectedQuantity(1);
+    }
+  };
+
+  const increaseQuantity = () => {
+    const maxStock = singleProductData?.stock_quantity || 0;
+    if (selectedQuantity < maxStock) {
+      setSelectedQuantity(selectedQuantity + 1);
+    } else {
+      Alert.alert('Maximum Limit', `Only ${maxStock} items available in stock`);
+    }
+  };
+
+  const decreaseQuantity = () => {
+    if (selectedQuantity > 1) {
+      setSelectedQuantity(selectedQuantity - 1);
+    }
+  };
 
   useEffect(() => {
     if (productSearchQuery.trim() === "") setFilteredProducts(categoryProducts);
@@ -744,6 +883,7 @@ export default function CategoriesScreen() {
     setCategoryProducts(products);
     setFilteredProducts(products);
     setProductsLoading(false);
+    setShowGlobalResults(false);
     if (products.length === 0) Alert.alert("No Products", `No products found in "${category.name}" category.`);
   };
 
@@ -826,15 +966,132 @@ export default function CategoriesScreen() {
       </View>
       <View style={{ flexDirection: 'row', margin: 16, borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 12, paddingHorizontal: 16, alignItems: 'center', backgroundColor: '#fff' }}>
         <Text style={{ fontSize: 18, marginRight: 10, color: '#666' }}>🔍</Text>
-        <TextInput placeholder="Search categories..." value={searchQuery} onChangeText={setSearchQuery} style={{ flex: 1, paddingVertical: 12, fontSize: 15 }} placeholderTextColor="#999" />
+        <TextInput 
+          placeholder="Search categories or products..." 
+          value={searchQuery} 
+          onChangeText={setSearchQuery} 
+          style={{ flex: 1, paddingVertical: 12, fontSize: 15 }} 
+          placeholderTextColor="#999" 
+        />
         {searchQuery !== "" && <TouchableOpacity onPress={() => setSearchQuery("")}><Text style={{ color: '#FF6B6B', fontSize: 18, fontWeight: 'bold' }}>✕</Text></TouchableOpacity>}
       </View>
+      
+      {/* Global Product Search Results */}
+      {showGlobalResults && searchQuery.trim() !== "" && (
+        <View style={{ marginHorizontal: 16, marginBottom: 12 }}>
+          <Text style={{ fontWeight: 'bold', marginBottom: 8, fontSize: 16 }}>Products Found:</Text>
+          {globalProductsLoading ? (
+            <ActivityIndicator size="small" color="#FF6B6B" />
+          ) : globalProductResults.length > 0 ? (
+            globalProductResults.map((product, index) => (
+              <TouchableOpacity
+                key={product.id}
+                onPress={() => handleGlobalProductPress(product)}
+                style={{ backgroundColor: '#fff', padding: 12, borderRadius: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'center' }}
+              >
+                <View style={{ width: 50, height: 50, backgroundColor: '#f0f0f0', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                  <Text style={{ fontSize: 24 }}>📦</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontWeight: 'bold' }}>{product.name}</Text>
+                  <Text style={{ fontSize: 12, color: '#666' }}>{product.categoryName}</Text>
+                  <Text style={{ fontSize: 14, color: '#FF6B6B', fontWeight: 'bold' }}>{formatPrice(product.selling_price || product.price)}</Text>
+                </View>
+                <Text style={{ fontSize: 20 }}>→</Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <Text style={{ color: '#999', textAlign: 'center', padding: 20 }}>No products found matching "{searchQuery}"</Text>
+          )}
+        </View>
+      )}
+      
       <TouchableOpacity onPress={loadCategories} disabled={loading} style={{ backgroundColor: loading ? "#adb5bd" : "#FF6B6B", paddingVertical: 12, marginHorizontal: 16, marginBottom: 12, borderRadius: 12 }}>
         <Text style={{ color: "white", textAlign: "center", fontWeight: "600" }}>{loading ? "Loading..." : "Refresh Categories"}</Text>
       </TouchableOpacity>
+      
       {loading && categories.length === 0 ? <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#FF6B6B" /><Text>Loading categories...</Text></View> : (
         <FlatList data={filteredCategories} keyExtractor={(item, index) => String(item?.id || index)} renderItem={renderCategoryItem} numColumns={2} columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: 4 }} contentContainerStyle={{ padding: 12 }} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#FF6B6B']} tintColor="#FF6B6B" />} ListEmptyComponent={() => <View style={{ padding: 40 }}><Text style={{ fontSize: 60, textAlign: 'center' }}>📂</Text><Text style={{ textAlign: 'center' }}>{searchQuery ? "No categories match." : "No categories found."}</Text></View>} />
       )}
+      
+      {/* Modal for Single Product from Search - WITH QUANTITY SELECTOR */}
+      <Modal visible={singleProductModalVisible} animationType="slide" transparent={false}>
+        <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+          <View style={{ backgroundColor: '#fff', padding: 20, paddingTop: 48, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+              <TouchableOpacity onPress={() => setSingleProductModalVisible(false)}><Text style={{ fontSize: 28, marginRight: 12 }}>←</Text></TouchableOpacity>
+              <Text style={{ fontSize: 22, fontWeight: 'bold' }}>Product Details</Text>
+              <TouchableOpacity onPress={() => setShowCartPage(true)} style={{ marginLeft: 'auto' }}>
+                <Text style={{ fontSize: 26 }}>🛒</Text>
+                {cartCount > 0 && <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#FF6B6B', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{cartCount > 99 ? '99+' : cartCount}</Text></View>}
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          {singleProductData && (
+            <ScrollView contentContainerStyle={{ padding: 20 }}>
+              <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, elevation: 5 }}>
+                <View style={{ width: 200, height: 200, backgroundColor: '#f8f9fa', borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 20 }}>
+                  {(singleProductData.image_path || singleProductData.image) && !imageErrors[`single_${singleProductData.id}`] ? (
+                    <Image 
+                      source={{ uri: getImageUrl(singleProductData.image_path || singleProductData.image) }} 
+                      style={{ width: 200, height: 200, borderRadius: 16 }} 
+                      onError={() => handleImageError(`single_${singleProductData.id}`)} 
+                      resizeMode="cover" 
+                    />
+                  ) : (
+                    <Text style={{ fontSize: 80 }}>📦</Text>
+                  )}
+                </View>
+                
+                <Text style={{ fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 }}>{singleProductData.name}</Text>
+                <Text style={{ fontSize: 18, color: '#666', marginBottom: 10 }}>{singleProductData.categoryName}</Text>
+                <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#FF6B6B', marginBottom: 15 }}>
+                  {formatPrice(singleProductData.selling_price || singleProductData.price)}
+                </Text>
+                
+                <View style={{ backgroundColor: (singleProductData.stock_quantity || 0) > 0 ? '#e8f5e9' : '#ffebee', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginBottom: 20 }}>
+                  <Text style={{ fontSize: 14, color: (singleProductData.stock_quantity || 0) > 0 ? '#2e7d32' : '#c62828', fontWeight: '500' }}>
+                    {(singleProductData.stock_quantity || 0) > 0 ? `${singleProductData.stock_quantity} in stock` : 'Out of stock'}
+                  </Text>
+                </View>
+
+                {/* Quantity Selector */}
+                {(singleProductData.stock_quantity || 0) > 0 && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 20 }}>
+                    <TouchableOpacity 
+                      onPress={decreaseQuantity} 
+                      style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: '#e9ecef', justifyContent: 'center', alignItems: 'center' }}
+                    >
+                      <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#333' }}>-</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 28, fontWeight: 'bold', marginHorizontal: 30, minWidth: 50, textAlign: 'center' }}>
+                      {selectedQuantity}
+                    </Text>
+                    <TouchableOpacity 
+                      onPress={increaseQuantity} 
+                      style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: '#FF6B6B', justifyContent: 'center', alignItems: 'center' }}
+                    >
+                      <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#fff' }}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                
+                <TouchableOpacity 
+                  onPress={handleAddToCartWithQuantity} 
+                  disabled={(singleProductData.stock_quantity || 0) === 0}
+                  style={{ backgroundColor: (singleProductData.stock_quantity || 0) === 0 ? '#adb5bd' : '#FF6B6B', paddingVertical: 16, paddingHorizontal: 40, borderRadius: 30, width: '100%', alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
+                    {(singleProductData.stock_quantity || 0) === 0 ? 'Out of Stock' : `Add ${selectedQuantity} to Cart 🛒`}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
+      
       <Modal visible={productsModalVisible} animationType="slide" transparent={false} onRequestClose={() => { setProductsModalVisible(false); setProductSearchQuery(""); setFilteredProducts([]); }}>
         <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
           <View style={{ backgroundColor: '#fff', padding: 20, paddingTop: 48, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' }}>
