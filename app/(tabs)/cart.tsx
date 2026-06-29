@@ -16,7 +16,7 @@ import {
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 45) / 2;
-const API_BASE_URL = "http://192.168.1.147:8000";
+import { API_BASE_URL } from "../../constants/config";
 
 // ============================================
 // 1️⃣ CART CONTEXT

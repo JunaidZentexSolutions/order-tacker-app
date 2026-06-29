@@ -3,7 +3,6 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
-// ✅ Computer ka actual IP (ipconfig se 192.168.1.148)
 const API_BASE_URL = "http://161.97.187.200:8000";
 export default function Login() {
   const router = useRouter();
